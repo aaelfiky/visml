@@ -1,0 +1,32 @@
+{
+  "generator-phovea": {
+    "type": "app",
+    "app": "Visml",
+    "clientOnly": false,
+    "entries": {
+      "app": "./src/index.ts"
+    },
+    "libraries": [
+      "d3"
+    ],
+    "modules": [
+      "phovea_core",
+      "phovea_d3",
+      "phovea_ui"
+    ],
+    "libraryAliases": {
+      "d3": "d3/d3"
+    },
+    "libraryExternals": [
+      "d3",
+      "jquery",
+      "font-awesome"
+    ],
+    "ignores": [],
+    "extensions": [],
+    "name": "visml",
+    "author": "som3a123",
+    "today": "Fri, 12 Jan 2018 10:24:07 GMT",
+    "githubAccount": "phovea"
+  }
+}
