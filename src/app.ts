@@ -4,6 +4,8 @@
 
 import * as d3 from 'd3';
 import {HELLO_WORLD} from './language';
+import {strings} from './data';
+import Test from './test';
 
 /**
  * The main class for the App app
@@ -30,7 +32,8 @@ export class App {
    * @returns {Promise<App>}
    */
   private build() {
-    this.$node.html(HELLO_WORLD);
+    const x = new Test(strings);
+    // this.$node.html(HELLO_WORLD);
     return Promise.resolve(null);
   }
 
