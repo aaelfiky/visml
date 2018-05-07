@@ -33,7 +33,7 @@ export class App {
    * @returns {Promise<App>}
    */
   private build() {
-    const x_ = new Test_ML();
+    const x_ = new Test();
     // this.$node.html(HELLO_WORLD);
     return Promise.resolve(null);
   }

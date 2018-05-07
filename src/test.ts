@@ -1,467 +1,465 @@
 import * as d3 from 'd3';
-import {strings} from './data';
 import * as ajax from 'phovea_core/src/ajax';
 import {getAPIData, getAPIJSON} from 'phovea_core/src/ajax';
-import {select} from 'd3';
-import sqrt = d3.scale.sqrt;
+
 
 export default class Test{
-  //declaring fields
 
-  in_change: boolean; // tracks the change inside the image rects
-  dataset_: { actual: number, predicted: number}[] = []; // used to build the color rects
-  sprite: boolean; // tells whether the image sprite is ready or not
+  //declaring fields
   chart: boolean; // tells whether the first chart was ready or not
-  selected_image_index: number; // index for the selected image
 
   constructor() {
 
-    this.sprite = false;
-    this.in_change = false;
     this.chart = false;
-
-    this.buildform();
+    this.buildScatterPlot();
 
   }
 
-  // for handling the color rects array
-  makeRequest(num: number[]) {
-    return ajax.getAPIJSON(`/mnist-files/${num}`);
+  // get all data (tsne projections, all prediction probs for test images,
+  // all pred vs labels for all test images)
+  getAlldata(){
+    return ajax.getAPIJSON(`/mnist-files/tsne/`);
   }
 
-  // for outputting the sprite
-  handleClick(num: number[]){
-    return getAPIData(`/mnist-files/image/${num}`, {}, 'blob');
-  }
+  buildScatterPlot() {
+      let scroll = false;
+      let done = false;
+      this.getAlldata().then((result)=> {
+        let chart = false;
 
-  // for handling a specific number in the sprite
-  handleBlobClick(num: number){
-    return getAPIData(`/mnist-files/box/${num}`, {}, 'blob');
-  }
+        let $ml_container = d3.select("body").select("#ml-container");
+        let $p = $ml_container.append("p").attr("id", "g1");
 
-  // for handling probabilities
-  fetchPredictions(num: number){
-    return ajax.getAPIJSON(`/mnist-files/predict/${num}`);
-  }
-
-
-  buildform(){
-
-    let $formDiv = d3.select("body").append("div").attr("id","from-to");
-
-    let $from = $formDiv //from range
-      .append("input")
-      .attr("name","From")
-      .attr("type","text")
-      .attr("class","from")
-      .attr("placeholder","From");
-    let $to = $formDiv // to range
-      .append("input")
-      .attr("name","To")
-      .attr("type","text")
-      .attr("class","to")
-      .attr("placeholder","To");
-    let $preview = $formDiv // submit button
-      .append("input")
-      .attr("class","preview")
-      .attr("name","Submit")
-      .attr("type","submit")
-      .attr("value","Preview")
-      .on("click",() => { // start preview call
-        // do something here
-        const fromValue = parseInt($from.property("value"), 10);
-        const toValue = parseInt($to.property("value"), 10);
-
-        const range = toValue - fromValue;
-        let ok = false;
-        let vText = "";
-        if (range > 50 || range < 40 || fromValue<0) { // checking bounds
-          ok = false;
-          $formDiv.select("#text-valid").remove();
-          if(fromValue<0){
-            vText = "Out of bound range";
+        let data_brushed_handle = [];
+        let tsne_data = [];
+        for (let i = 0; i < result.list.length; i++) {
+          let classify = false;
+          if (result.pl[i][0] == result.pl[i][1]) {
+            classify = true;
           }
-          else{
-            vText = "Please enter a range of between 40 to 50 entries";
-          }
-          let $p = $formDiv
-            .append("H5")
-            .attr("id","text-valid")
-            .text(vText);
-        }
-        else {
-          ok = true;
-        }
-        var fromTo = [fromValue, toValue];
-        if (ok){ // start if ok (valid range)
-          $formDiv.select("#text-valid").remove();
-          this.handleClick(fromTo).then((res) => { // handle click call
-
-            if(res.size >10000) {
-
-
-              this.in_change = true;
-              this.sprite = false;
-              let rect_data: { predicted: number, actual: number}[] = [];
-
-              d3.select("#ml-container").remove();
-              d3.select("body")
-                .append("div")
-                .attr("id", "ml-container")
-
-
-              const imageUrl = window.URL.createObjectURL(res);
-              let $ml = select("#ml-container")
-                .append("div");
-              let $img = $ml.append("img")
-                .attr("id", "sprite")
-                .attr('src', imageUrl);
-              this.sprite = true;
-              this.makeRequest(fromTo).then((ret) => {
-                this.chart = false;
-                for (let i = 0; i < ret.list.length; i++) {
-                  rect_data.push({
-                    "predicted": ret.list[i][0],
-                    "actual": ret.list[i][1]
-                  });
-                }
-
-                this.dataset_ = rect_data;
-                while (!this.sprite) ;
-                this.buildColorRects();
-
-                this.buildBoxes();
-
-              });
-
-              $img.on("click", () => {
-                let elem = $img[0][0];
-                let e = (<Element>elem);
-                this.onImg(e, fromValue, toValue, range, rect_data);
-                this.fetchPredictions(this.selected_image_index)
-                  .then((result) => {
-                    this.buildChart(result.list);
-                  });
-              })
+          tsne_data.push(
+            {
+              x: result.list[i][0],
+              y: result.list[i][1],
+              index: i,
+              selected: false,
+              c: classify,
+              predicted: result.pl[i][0],
+              actual: result.pl[i][1],
+              prb: result.prob[i]
             }
-            else{
-              $formDiv.select("#text-valid").remove();
-              vText = "Range Out of Bound";
-              let $p = $formDiv
-                .append("H2")
-                .attr("id","text-valid")
-                .text(vText);
+          );
+        }
+
+
+        var margin = {top: 20, right: 20, bottom: 30, left: 50};
+        let width = 600 - margin.left - margin.right,
+          height = 500 - margin.top - margin.bottom;
+
+        var quadtree = d3.geom.quadtree()
+          .extent([[-1, -1], [width + 1, height + 1]])
+          (tsne_data);
+
+        var x = d3.scale.linear()
+          .range([0, width]);
+
+        var y = d3.scale.linear()
+          .range([height, 0]);
+
+        var xAxis = d3.svg.axis()
+          .scale(x)
+          .orient("bottom");
+
+        var yAxis = d3.svg.axis()
+          .scale(y)
+          .orient("left");
+
+        var svg = d3.select("#g1").append("svg")
+          .attr("id", "g1_svg")
+          .attr("data-margin-right", margin.right)
+          .attr("data-margin-left", margin.left)
+          .attr("data-margin-top", margin.top)
+          .attr("data-margin-bottom", margin.bottom)
+          .attr("width", width + margin.left + margin.right)
+          .attr("height", height + margin.top + margin.bottom)
+          .append("g")
+          .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+        x.domain(d3.extent(tsne_data, function (d) {
+          return d.x;
+        })).nice();
+        y.domain(d3.extent(tsne_data, function (d) {
+          return d.y;
+        })).nice();
+
+        svg.append("g")
+          .attr("class", "x axis ")
+          .attr('id', "axis--x")
+          .attr("transform", "translate(0," + height + ")")
+          .call(xAxis);
+
+        svg.append("g")
+          .attr("class", "y axis")
+          .attr('id', "axis--y")
+          .call(yAxis);
+
+        var dot = svg.selectAll(".dot")
+          .data(tsne_data)
+          .enter().append("circle")
+          .attr("class", "dot")
+          .attr("r", 5)
+          .attr("cx", function (d) {
+            return x(d.x);
+          })
+          .attr("cy", function (d) {
+            return y(d.y);
+          })
+          .attr("opacity", 0.7)
+          // .style("fill", "#4292c6");
+          .style("fill", function (d) {
+            if (d.actual == d.predicted) {
+              return "#008000";
+            }
+            else {
+              return "#FF0000";
+            }
+          });
+
+        var brush = d3.svg.brush()
+          .x(x)
+          .y(y)
+          .on("brush", brushed);
+
+        svg.append("g")
+          .call(brush);
+
+
+        function brushed() {
+
+          // data_brushed = [];
+          var e = brush.extent(),
+            x0 = e[0][0],
+            y0 = e[0][1],
+            dx = e[1][0] - x0,
+            dy = e[1][1] - y0;
+          handleBrush(e);
+
+
+
+        }
+
+        function handleBrush(selection) {
+          data_brushed_handle = [];
+          let $svg = d3.select("#chart").remove();
+          chart = false;
+          var x0 = selection[0][0],
+            y0 = selection[0][1],
+            dx = selection[1][0],
+            dy = selection[1][1];
+          tsne_data.forEach(function (d, i) {
+            if (d.x >= x0 && d.x <= dx && d.y >= y0 && d.y <= dy) {
+              data_brushed_handle.push(d.index);
+              d.selected = true;
+            }
+            else {
+              d.selected = false;
+            }
+          });
+
+          if (!scroll) {
+            let max = Math.min(data_brushed_handle.length, 150);
+
+            let $spriteDiv = d3.select("#ml-container")
+              .append("div")
+              .attr("id", "scroll-div");
+            scroll = true;
+            let images = [];
+            let num = 0;
+            // console.log(JSON.stringify(data_brushed_handle));
+            for (let i = 0; i < max; i++) {
+              // fetch MNIST images
+              getAPIData(`/mnist-files/box/${data_brushed_handle[i]}`,
+                {}, 'blob')
+                .then((res) => {
+                  let i_actual = Math.floor(tsne_data[data_brushed_handle[i]].actual);
+                  let i_predict = Math.floor(tsne_data[data_brushed_handle[i]].predicted);
+                  let $image_div = $spriteDiv.append("div");
+                  let $images = $image_div.append("img")
+                    .attr("id", "scroll-img")
+                    .attr("src", window.URL.createObjectURL(res))
+                    .style("border",function () {
+                       if(i_actual==i_predict){
+                         return "3px solid green"
+                       }
+                       else{
+                         return "3px solid red"
+                       }
+                    })
+                    .on('click', function () {
+                      handleImageClick(tsne_data[data_brushed_handle[i]].prb,
+                        i_actual,
+                        i_predict);
+                    });
+                });
+
             }
 
-
-          }); // end handle click call
-        } // end if ok
-
-        }); // end preview call
-
-
-  }
-
-  // On image click, preview predict and actual boxes
-  onImg(element:Element,
-        fromValue: number, toValue:number, range:number,
-        rect_data:{predicted: number, actual: number}[]
-        )
-  {
-          let coordinates = d3.mouse(d3.select(element).node());
-          let area = element.clientWidth * element.clientHeight;
-
-          let square = Math.sqrt(area / range);
-          let max_i = 9;
-          let max_j = 4;
-
-          let in_i = Math.floor(coordinates[0] / square);
-          let in_j = Math.floor(coordinates[1] / square);
-
-          let indd = in_j * 10 + in_i;
-
-          let par = indd + fromValue;
-          this.selected_image_index=par;
-          let d_ = rect_data[indd];
-          let c: string = "";
-
-          if (d_.actual == d_.predicted) {
-            c = "green";
           }
           else {
-            c = "red";
+            let max = Math.min(data_brushed_handle.length, 150);
+            let old = d3.select("#scroll-div").remove();
+            let $spriteDiv = d3.select("#ml-container")
+              .append("div")
+              .attr("id", "scroll-div");
+            let images = [];
+            let num = 0;
+            for (let i = 0; i < max; i++) {
+              // console.log(max);
+              getAPIData(`/mnist-files/box/${data_brushed_handle[i]}`,
+                {}, 'blob')
+                .then((res) => {
+                  let i_actual = Math.floor(tsne_data[data_brushed_handle[i]].actual);
+                  let i_predict = Math.floor(tsne_data[data_brushed_handle[i]].predicted);
+                  let $images = $spriteDiv.append("div")
+                    .append("img").attr("id", "scroll-img")
+                    .attr("src", window.URL.createObjectURL(res))
+                    .style("border",function () {
+                       if(i_actual==i_predict){
+                         return "3px solid green"
+                       }
+                       else{
+                         return "3px solid red"
+                       }
+                    })
+                    .on('click', function () {
+                      handleImageClick(tsne_data[data_brushed_handle[i]].prb,
+                        i_actual,
+                        i_predict);
+                    });
+
+                });
+
+            }
+          }
+        }
+
+
+        // BUILD BAR CHART
+        function handleImageClick(in_data, actual, predicted) {
+
+          let data: { "label": number, "prob": number, "color": string, "border": boolean }[] = [];
+          for (let i = 0; i < in_data.length; i++) {
+            let color = "#808080";
+            let border = false;
+            if (actual == i) {
+              border = true;
+              if (actual == predicted) {
+                color = "#008000";
+              }
+              else {
+                color = "#808080";
+              }
+            }
+
+
+            if (predicted == i) {
+              if (actual == predicted) {
+                color = "#008000";
+              }
+              else {
+                color = "#FF0000";
+              }
+            }
+
+            let temp: { "label": number, "prob": number, "color": string, "border": boolean } =
+              {"label": i, "prob": in_data[i], "color": color, "border": border};
+            data.push(temp);
           }
 
-          let top = in_i * square;
-          let bottom = (in_i + 1) * square;
-          let left = in_j * square;
-          let right = (in_j + 1) * square;
 
-          getAPIData(`/mnist-files/box/${par}`, {}, 'blob')
-            .then((res) => {
+          // SETUP
+          var margin = {top: 35, right: 0, bottom: 30, left: 40};
 
-              const imURL = window.URL.createObjectURL(res);
-              console.log(imURL);
-              d3.select("body").select("#actual")
-                .select("#actual-box")
-                .attr('src', imURL);
-              d3.select("body").select("#predict")
-                .select("#predict-box").style("background-color", c);
-              d3.select("#predict")
-                .select("#actual-label")
-                .selectAll("h4").remove();
-              d3.select("#predict")
-                .select("#actual-label")
-                .append("H4")
-                .style("margin-left","6px")
-                .text(Math.floor(d_.actual));
-              d3.select("#predict")
-                .select("#actual-label")
-                .append("H4")
-                .style("margin-left","6px")
-                .text(Math.floor(d_.predicted));
-          });
-          this.in_change= true;
-  }
+          var width = 400 - margin.left - margin.right;
+          var height = 250 - margin.top - margin.bottom;
 
 
+          ///////////////////////
+          // Scales
+          var x = d3.scale.ordinal()
+            .domain(data.map(function (d) {
+              return d.label.toString();
+            }))
+            .rangeRoundBands([0, width], .1);
 
-  buildChart(in_data: number[]){
+          var y = d3.scale.linear()
+            .domain([0, d3.max(data, function (d) {
+              return d.prob;
+            }) * 1.1])
+            .range([height, 0]);
 
-    let labels = 10;
-    if(in_data.length == 0){
-      in_data = [0,0,0,0,0,0,0,0,0,0];
-    }
-    let data :{label:number, prob:number}[] = [];
-    for (let i = 0; i< in_data.length;i++){
-      let temp:{"label": number, "prob": number} = {"label": i, "prob": in_data[i]};
-      data.push(temp);
-    }
+          // AXIS
+          var xAxis = d3.svg.axis()
+            .scale(x)
+            .orient("bottom");
 
+          var yAxis = d3.svg.axis()
+            .scale(y)
+            .orient("left");
 
-    // SETUP
-    var margin = { top: 35, right: 0, bottom: 30, left: 40 };
+          // CHART
+          if (!chart) {
 
-    var width = 400 - margin.left - margin.right;
-    var height = 250 - margin.top - margin.bottom;
+            let $chart = d3.select("body")
+              .select("#ml-container")
+              .append("svg")
+              .attr("id", "chart")
+              .attr("width", 400)
+              .attr("height", 250)
+              .append("g")
+              .attr("transform", "translate(" + margin.left + "," + margin.top + ")")
+              .attr("id", "inner-g");
 
+            $chart.append("g")
+              .attr("class", "x axis")
+              .attr("transform", "translate(0," + height + ")")
+              .call(xAxis)
+              .append("text")
+              .style("text-anchor", "start")
+              .style("alignment-baseline", "hanging")
+              .attr("y", 20)
+              .attr("x", 335)
+              .text("Label");
 
-    ///////////////////////
-    // Scales
-    var x = d3.scale.ordinal()
-      .domain(data.map(function(d) { return d.label.toString(); }))
-      .rangeRoundBands([0, width], .1);
+            $chart.append("g")
+              .attr("class", "y axis")
+              .call(yAxis)
+              .append("text")
+              .style("text-anchor", "start")
+              .style("alignment-baseline", "ideographic")
+              .attr("y", -15)
+              .attr("x", -25)
+              .attr("dy", ".6em")
+              .text("Probability (%)");
 
-    var y = d3.scale.linear()
-      .domain([0, d3.max(data, function(d) { return d.prob; }) * 1.1])
-      .range([height, 0]);
+            // TITLE
+            $chart.append("text")
+              .text('Classification Probabilities')
+              .attr("text-anchor", "middle")
+              .attr("class", "graph-title")
+              .attr("y", -10)
+              .attr("x", width / 2.0);
 
-    // AXIS
-    var xAxis = d3.svg.axis()
-      .scale(x)
-      .orient("bottom");
+            //BARS
+            let bar = $chart.selectAll(".bar")
+              .data(data)
+              .enter().append("rect")
+              .attr("class", "bar")
+              .attr("x", function (d) {
+                return x(d.label.toString());
+              })
+              .attr("y", height)
+              .attr("fill", function (d) {
+                return d.color;
+              })
+              .attr("width", width + margin.left + margin.right)
+              .attr("height", 0)
+              .attr("width", x.rangeBand())
+              .attr("y", function (d) {
+                return y(d.prob);
+              })
+              .attr("height", function (d) {
+                return height - y(d.prob);
+              })
+              .style("stroke", function (d) {
+                if (d.border) {
+                  return "black";
+                }
+              })
+              .style("stroke-width", function (d) {
+                if (d.border) {
+                  return "2px";
+                }
+              });
+            chart = true;
+          }
+          else {
+            let $svg = d3.select("#chart").remove();
+            //
+            let $chart = d3.select("body")
+              .select("#ml-container")
+              .append("svg")
+              .attr("id", "chart")
+              .attr("width", 400)
+              .attr("height", 260)
+              .append("g")
+              .attr("transform", "translate(" + margin.left + "," + margin.top + ")")
+              .attr("id", "inner-g");
 
-    var yAxis = d3.svg.axis()
-        .scale(y)
-        .orient("left");
+            $chart.append("g")
+              .attr("class", "x axis")
+              .attr("transform", "translate(0," + height + ")")
+              .call(xAxis)
+              .append("text")
+              .style("text-anchor", "start")
+              .style("alignment-baseline", "hanging")
+              .attr("y", 20)
+              .attr("x", 335)
+              .text("Label");
 
-    // CHART
-    if(!this.chart) {
+            $chart.append("g")
+              .attr("class", "y axis")
+              .call(yAxis)
+              .append("text")
+              .style("text-anchor", "start")
+              .style("alignment-baseline", "ideographic")
+              .attr("y", -15)
+              .attr("x", -25)
+              .attr("dy", ".6em")
+              .text("Probability (%)");
 
-      let $chart = d3.select("body")
-        .select("#ml-container")
-        .append("svg")
-        .attr("id", "chart")
-        .attr("width", 400)
-        .attr("height", 250)
-        .append("g")
-        .attr("transform", "translate(" + margin.left + "," + margin.top + ")")
-        .attr("id","inner-g");
+            // TITLE
+            $chart.append("text")
+              .text('Classification Probabilities')
+              .attr("text-anchor", "middle")
+              .attr("class", "graph-title")
+              .attr("y", -10)
+              .attr("x", width / 2.0);
 
-      $chart.append("g")
-        .attr("class", "x axis")
-        .attr("transform", "translate(0," + height + ")")
-        .call(xAxis)
-        .append("text")
-        .style("text-anchor", "start")
-        .style("alignment-baseline", "hanging")
-        .attr("y", 20)
-        .attr("x", 335)
-        .text("Label");
-
-      $chart.append("g")
-        .attr("class", "y axis")
-        .call(yAxis)
-        .append("text")
-        .style("text-anchor", "start")
-        .style("alignment-baseline", "ideographic")
-        .attr("y", -15)
-        .attr("x", -25)
-        .attr("dy", ".6em")
-        .text("Probability (%)");
-
-      // TITLE
-      $chart.append("text")
-        .text('Classification Probabilities')
-        .attr("text-anchor", "middle")
-        .attr("class", "graph-title")
-        .attr("y", -10)
-        .attr("x", width / 2.0);
-
-      //BARS
-      let bar = $chart.selectAll(".bar")
-        .data(data)
-        .enter().append("rect")
-        .attr("class", "bar")
-        .attr("x", function (d) {
-          return x(d.label.toString());
-        })
-        .attr("y", height)
-        .attr("width", width + margin.left + margin.right)
-        .attr("height", 0)
-        .attr("width", x.rangeBand())
-        .attr("y", function (d) {
-          return y(d.prob);
-        })
-        .attr("height", function (d) {
-          return height - y(d.prob);
-        });
-       this.chart = true;
-    }
-    else{
-      let $svg = d3.select("#chart").remove();
-    //
-      let $chart = d3.select("body")
-        .select("#ml-container")
-        .append("svg")
-        .attr("id", "chart")
-        .attr("width", 400)
-        .attr("height", 260)
-        .append("g")
-        .attr("transform", "translate(" + margin.left + "," + margin.top + ")")
-        .attr("id","inner-g");
-
-      $chart.append("g")
-        .attr("class", "x axis")
-        .attr("transform", "translate(0," + height + ")")
-        .call(xAxis)
-        .append("text")
-        .style("text-anchor", "start")
-        .style("alignment-baseline", "hanging")
-        .attr("y", 20)
-        .attr("x", 335)
-        .text("Label");
-
-      $chart.append("g")
-        .attr("class", "y axis")
-        .call(yAxis)
-        .append("text")
-        .style("text-anchor", "start")
-        .style("alignment-baseline", "ideographic")
-        .attr("y", -15)
-        .attr("x", -25)
-        .attr("dy", ".6em")
-        .text("Probability (%)");
-
-      // TITLE
-      $chart.append("text")
-        .text('Classification Probabilities')
-        .attr("text-anchor", "middle")
-        .attr("class", "graph-title")
-        .attr("y", -10)
-        .attr("x", width / 2.0);
-
-      //BARS
-      let bar = $chart.selectAll(".bar")
-        .data(data)
-        .enter().append("rect")
-        .attr("class", "bar")
-        .attr("x", function (d) {
-          return x(d.label.toString());
-        })
-        .attr("y", height)
-        .attr("width", width + margin.left + margin.right)
-        .attr("height", 0)
-        .attr("width", x.rangeBand())
-        .attr("y", function (d) {
-          return y(d.prob);
-        })
-        .attr("height", function (d) {
-          return height - y(d.prob);
-        });
-
-    }
-
-
-
-  }
-
-
-  buildColorRects(): void{
-
-    let $container = d3.select("body").select("#ml-container");
-    let heatmap = $container.append("div").attr("id", "heatmap");
-    let img = heatmap.selectAll("#image-map")
-      .data(this.dataset_)
-      .enter()
-      .append("div")
-      .attr("class","rect-div")
-      .attr("height", 10)
-      .attr("width", 10)
-      .style("background-color", function (d) {
-        if(d.actual == d.predicted){
-          return "green";
+            //BARS
+            let bar = $chart.selectAll(".bar")
+              .data(data)
+              .enter().append("rect")
+              .attr("class", "bar")
+              .attr("x", function (d) {
+                return x(d.label.toString());
+              })
+              .attr("y", height)
+              .attr("fill", function (d) {
+                return d.color;
+              })
+              .attr("width", width + margin.left + margin.right)
+              .attr("height", 0)
+              .attr("width", x.rangeBand())
+              .attr("y", function (d) {
+                return y(d.prob);
+              })
+              .attr("height", function (d) {
+                return height - y(d.prob);
+              })
+             .style("stroke",function (d) {
+                  if(d.border){
+                    return "black";
+                  }
+                })
+              .style("stroke-width",function (d) {
+                    if(d.border){
+                      return "2px";
+                    }
+              });
+          }
         }
-        else{
-          return "red";
-        }
+        done = true;
       });
-
   }
-
-  buildBoxes(): void{
-    let container = d3.select("body").select("#ml-container");
-    let box = container
-      .append("div")
-      .attr("id","selected-img")
-      .style("display","grid");
-
-    // Actual
-    let abox =  box.append("div").attr("id", "actual");
-    let header = document.getElementById("actual");
-    let h = document.createElement("H3");
-    let t = document.createTextNode("Selected Image:");
-    h.appendChild(t);
-    header.appendChild(h);
-    let actualImg = abox.append("div")
-      .append("img")
-      .attr("id","actual-box");
-
-    // Predict
-    let pbox =  box.append("div").attr("id", "predict");
-    let header2 = document.getElementById("predict");
-    let h2 = document.createElement("H3");
-    let t2 = document.createTextNode("Classification Result:");
-    h2.appendChild(t2);
-    header2.appendChild(h2);
-    let predictImg = pbox.append("div").attr("id","predict-box");
-
-    let numbers= pbox.append("div").attr("id","actual-label");
-
-    let header3 = document.getElementById("actual-label");
-    // let header3 = d3.select("#selected-img").select("#actual-label");
-
-    let h3 = document.createElement("H5");
-    let t3 = document.createTextNode("Actual:");
-    h3.appendChild(t3);
-    header3.appendChild(h3);
-
-    let h4 = document.createElement("H5");
-    let t4 = document.createTextNode("Predicted:");
-    h4.appendChild(t4);
-    header3.appendChild(h4);
-
-  }
-
 }
-
