@@ -83,9 +83,6 @@ p{
   grid-template-rows: 0.5fr 1fr;
 }
 
-//#predict > h2{
-//  margin: 30px;
-//}
 
 #actual-label{
   display: grid;
@@ -110,9 +107,7 @@ p{
 
 
 // BAR CHART
-.bar {
-  //fill: steelblue;
-}
+
 
 .bar:hover {
   fill: lightblue;
@@ -138,9 +133,6 @@ p{
   fill: #000;
   fill-opacity: .125;
   stroke: #fff;
-  //max-height: 60%;
-  //max-width: 60%;
-
 }
 
 #scroll-div{
