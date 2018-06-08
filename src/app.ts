@@ -6,7 +6,7 @@ import * as d3 from 'd3';
 import {HELLO_WORLD} from './language';
 import {strings} from './data';
 import Test from './test';
-import Test_ML from './test_ML';
+
 
 /**
  * The main class for the App app

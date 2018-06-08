@@ -11,7 +11,7 @@ export default class Test{
   constructor() {
 
     this.chart = false;
-    this.buildScatterPlot();
+    this.build();
 
   }
 
@@ -21,7 +21,7 @@ export default class Test{
     return ajax.getAPIJSON(`/mnist-files/tsne/`);
   }
 
-  buildScatterPlot() {
+  build() {
       let scroll = false;
       let done = false;
       this.getAlldata().then((result)=> {
